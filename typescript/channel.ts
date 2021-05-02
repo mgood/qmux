@@ -23,6 +23,7 @@ export class Channel {
     myWindow: number;
     readBuf: Uint8Array | undefined;
     readers: Array<() => void>;
+    writers: Array<() => void>;
 
     constructor(sess: internal.Session) {
         this.localId = 0;
@@ -37,6 +38,7 @@ export class Channel {
         this.ready = new util.queue();
         this.session = sess;
         this.readers = [];
+        this.writers = [];
     }
 
     ident(): number {
@@ -66,24 +68,86 @@ export class Channel {
                 if (this.readBuf.length == 0 && this.gotEOF) {
                     this.readBuf = undefined;
                 }
-                resolve(data);
+                this.adjustWindow(data.byteLength).then(() => {
+                    resolve(data);
+                }).catch((e) => {
+                    if (e !== "EOF") {
+                        throw e;
+                    }
+                    resolve(data);
+                });
             }
             tryRead();
         });
     }
 
+    // TODO errors?
+    // TODO test when there is no buffer available
+    reserveWindow(win: number): number {
+        if (this.remoteWin < win) {
+            win = this.remoteWin;
+        }
+        this.remoteWin -= win;
+        // if closed -> EOF
+        return win;
+    }
+
+    addWindow(win: number) {
+        this.remoteWin += win;
+        if (this.writers.length > 0) {
+            let writer = this.writers.shift();
+            if (writer) writer();
+        }
+        // FIXME should we continue to loop while there's available buffer?
+    }
+
+    // XXX in Go we return the bytes written, as well as an error, but both may
+    // have happened if we're able to send one or more packets before failing.
+    // Should this still return the available data somehow when there's an
+    // error?
     write(buffer: Uint8Array): Promise<number> {
         if (this.sentEOF) {
             return Promise.reject("EOF");
         }
-        // TODO: use window
 
-        return this.send({
-            ID: codec.DataID,
-            channelID: this.remoteId,
-            length: buffer.byteLength,
-            data: buffer
-        });
+        return new Promise(resolve => {
+            let n = 0;
+            let tryWrite = () => {
+                if (buffer.byteLength == 0) {
+                    resolve(n);
+                    return;
+                }
+                // space := min(ch.maxRemotePayload, len(data))
+                let space = Math.min(this.maxRemotePayload, buffer.byteLength);
+                // if space, err = ch.remoteWin.reserve(space); err != nil {
+                let reserved = this.reserveWindow(space);
+                if (reserved == 0) {
+                    this.writers.push(tryWrite);
+                    return;
+                }
+
+                // toSend := data[:space]
+                let toSend = buffer.slice(0, reserved);
+
+                this.send({
+                    ID: codec.DataID,
+                    channelID: this.remoteId,
+                    length: toSend.byteLength,
+                    data: toSend,
+                }).then((sent) => {
+                    // n += len(toSend)
+                    n += toSend.byteLength;
+                    // data = data[len(toSend):]
+                    buffer = buffer.slice(toSend.byteLength);
+                    if (buffer.byteLength == 0) {
+                        resolve(n);
+                        return;
+                    }
+                    this.writers.push(tryWrite);
+                })
+            }
+            tryWrite();
+        })
     }
 
     async closeWrite() {
@@ -105,6 +169,7 @@ export class Channel {
             return;
         }
         this.shutdown();
+        // TODO do we need to unblock writers on the remoteWin like in Go?
     }
 
     shutdown(): void {
@@ -115,7 +180,14 @@ export class Channel {
     }
 
     async adjustWindow(n: number) {
-        // TODO
+        // Since myWindow is managed on our side, and can never exceed
+        // the initial window setting, we don't worry about overflow.
+        this.myWindow += n;
+        await this.send({
+            ID: codec.WindowAdjustID,
+            channelID: this.remoteId,
+            additionalBytes: n,
+        })
     }
 
     send(msg: codec.ChannelMessage): Promise<number> {
@@ -158,12 +230,12 @@ export class Channel {
             }
             this.remoteId = msg.senderID;
             this.maxRemotePayload = msg.maxPacketSize;
-            this.remoteWin += msg.windowSize;
+            this.addWindow(msg.windowSize);
             this.ready.push(true);
             return;
         }
         if (msg.ID === codec.WindowAdjustID) {
-            this.remoteWin += msg.additionalBytes;
+            this.addWindow(msg.additionalBytes);
         }
     }
 
