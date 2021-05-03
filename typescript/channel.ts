@@ -109,9 +109,13 @@ export class Channel {
             return Promise.reject("EOF");
         }
 
-        return new Promise(resolve => {
+        return new Promise((resolve, reject) => {
             let n = 0;
             let tryWrite = () => {
+                if (this.sentEOF || this.sentClose) {
+                    reject("EOF");
+                    return;
+                }
                 if (buffer.byteLength == 0) {
                     resolve(n);
                     return;
@@ -169,6 +173,7 @@ export class Channel {
     shutdown(): void {
         this.readBuf = undefined;
         this.readers.forEach(reader => reader());
+        this.writers.forEach(writer => writer());
         this.ready.close();
         this.session.rmCh(this.localId);
     }

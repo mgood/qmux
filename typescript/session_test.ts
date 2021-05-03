@@ -157,4 +157,4 @@ Deno.test("multiple pending reads", async () => {
     await sess1.close();
 
     listener.close();
-})
+});
