@@ -58,8 +58,6 @@ export class Channel {
                         resolve(undefined);
                         return;
                     }
-                    // TODO should these be served in-order? This will re-queue at
-                    // the end, but is that an issue?
                     this.readers.push(tryRead);
                     return;
                 }
