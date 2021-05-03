@@ -94,11 +94,11 @@ export class Channel {
 
     addWindow(win: number) {
         this.remoteWin += win;
-        if (this.writers.length > 0) {
+        while (this.remoteWin > 0) {
             let writer = this.writers.shift();
-            if (writer) writer();
+            if (!writer) break;
+            writer();
         }
-        // FIXME should we continue to loop while there's available buffer?
     }
 
     // XXX in Go we return the bytes written, as well as an error, but both may
