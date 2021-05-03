@@ -82,7 +82,6 @@ export class Channel {
     }
 
     // TODO errors?
-    // TODO test when there is no buffer available
     reserveWindow(win: number): number {
         if (this.remoteWin < win) {
             win = this.remoteWin;
@@ -117,16 +116,13 @@ export class Channel {
                     resolve(n);
                     return;
                 }
-                // space := min(ch.maxRemotePayload, len(data))
                 let space = Math.min(this.maxRemotePayload, buffer.byteLength);
-                // if space, err = ch.remoteWin.reserve(space); err != nil {
                 let reserved = this.reserveWindow(space);
                 if (reserved == 0) {
                     this.writers.push(tryWrite);
                     return;
                 }
 
-                // toSend := data[:space]
                 let toSend = buffer.slice(0, reserved);
 
                 this.send({
@@ -134,10 +130,8 @@ export class Channel {
                     channelID: this.remoteId,
                     length: toSend.byteLength,
                     data: toSend,
-                }).then((sent) => {
-                    // n += len(toSend)
+                }).then(() => {
                     n += toSend.byteLength;
-                    // data = data[len(toSend):]
                     buffer = buffer.slice(toSend.byteLength);
                     if (buffer.byteLength == 0) {
                         resolve(n);
