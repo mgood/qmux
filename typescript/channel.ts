@@ -81,13 +81,11 @@ export class Channel {
         });
     }
 
-    // TODO errors?
     reserveWindow(win: number): number {
         if (this.remoteWin < win) {
             win = this.remoteWin;
         }
         this.remoteWin -= win;
-        // if closed -> EOF
         return win;
     }
 
@@ -100,10 +98,6 @@ export class Channel {
         }
     }
 
-    // XXX in Go we return the bytes written, as well as an error, but both may
-    // have happened if we're able to send one or more packets before failing.
-    // Should this still return the available data somehow when there's an
-    // error?
     write(buffer: Uint8Array): Promise<number> {
         if (this.sentEOF) {
             return Promise.reject("EOF");
