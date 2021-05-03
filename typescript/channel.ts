@@ -154,6 +154,8 @@ export class Channel {
             ID: codec.EofID,
             channelID: this.remoteId
         });
+        this.writers.forEach(writer => writer());
+        this.writers = [];
     }
 
     async close(): Promise<void> {
@@ -167,7 +169,6 @@ export class Channel {
             return;
         }
         this.shutdown();
-        // TODO do we need to unblock writers on the remoteWin like in Go?
     }
 
     shutdown(): void {
